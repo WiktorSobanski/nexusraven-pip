@@ -145,12 +145,52 @@ Raven will produce a structured JSON and a Raw Python Call for you. The return d
 })
 ```
 
+
 If you would like to have your function calls in the [same way as OpenAI's Function Calling API returns it](https://cookbook.openai.com/examples/how_to_call_functions_with_chat_models), please utilize the "tool_calls" item.
 
 If you would like to have your function calls as pure python function calls, please use the "raw_calls" item.
 
 Optionally, if you would like NexusRaven-V2 to reason about its function use, and you have specified include_reasoning in your create call, you can use "reasoning" to pull NexusRaven-V2's reasoning.
 
+### Streaming & Async mode
+
+
+Nexus Raven Client supports calling in `Streaming` and `Async` mode. See the examples below to learn how to use them.
+
+#### Synchronous streaming mode
+
+```python
+response = client.chat.completions.create(
+    model="ravenv2",
+    messages=messages,
+    tools=tools,
+    include_reasoning = True,
+    tool_choice="auto",
+    stream = True  # to retrieve response in OpenAI-compatible chunks
+)
+
+```
+
+#### Asynchronous streaming mode
+
+With `async` mode, depending on the `stream` parameter your will create eiter a response, or `AsyncGenerator` object.
+
+
+```python
+response = await client.chat.completions.acreate(
+    model="ravenv2",
+    messages=messages,
+    tools=tools,
+    include_reasoning = True,
+    tool_choice="auto",
+    stream = True  # to retrieve response in OpenAI-compatible chunks
+)
+
+# Iterate over chunks
+async for chunk in response:
+    print(chunk)
+
+```
 
 ### NO WARRANTY DISCLAIMER
 
