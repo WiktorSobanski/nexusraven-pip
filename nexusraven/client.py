@@ -5,7 +5,7 @@ import inspect
 import ast
 import logging
 import json
-
+import requests
 import aiohttp
 import arrow
 
@@ -242,7 +242,7 @@ class Client:
                     raw_calls.append(line)
                 return tool_calls, raw_calls
 
-            async def create(
+            def create(
                 self,
                 messages,
                 tools=None,
@@ -251,34 +251,6 @@ class Client:
                 model="ravenv2",
                 tool_choice="auto",
                 stream=False,
-            ):
-                if stream:
-                    return self._create_stream(
-                        messages,
-                        tools,
-                        include_reasoning,
-                        max_new_tokens,
-                        model,
-                        tool_choice,
-                    )
-                else:
-                    return await self._create(
-                        messages,
-                        tools,
-                        include_reasoning,
-                        max_new_tokens,
-                        model,
-                        tool_choice,
-                    )
-
-            async def _create(
-                self,
-                messages,
-                tools=None,
-                include_reasoning=False,
-                max_new_tokens=2048,
-                model="ravenv2",
-                tool_choice="auto",
             ):
                 if model != "ravenv2":
                     self.logger.error("Only ravenv2 model supported!")
@@ -298,14 +270,31 @@ class Client:
                     formatted_tools, messages[0]["content"], max_new_tokens, stop
                 )
 
-                url = self.NEXUS_URL + "/generate"
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        url, headers=headers, json=payload
-                    ) as response:
-                        return await self._process_response(response, include_reasoning)
+                if stream:
+                    return self._create_stream(headers, payload)
+                else:
+                    return self._create(headers, payload, include_reasoning)
 
-            async def _create_stream(
+            def _create(self, headers, payload, include_reasoning):
+                url = self.NEXUS_URL + "/generate"
+                response = requests.post(url, headers=headers, json=payload)
+                return self._process_response(response, include_reasoning)
+
+            def _create_stream(self, headers, payload):
+                url = self.NEXUS_URL + "/generate_stream"
+                with requests.post(
+                    url, headers=headers, json=payload, stream=True
+                ) as response:
+                    for str_payload in response.iter_lines(decode_unicode=True):
+                        if str_payload == "\n":
+                            continue
+                        if str_payload.startswith("data:"):
+                            json_payload = json.loads(
+                                str_payload.lstrip("data:").rstrip("/n")
+                            )
+                            yield self._process_chunk(json_payload)
+
+            async def acreate(
                 self,
                 messages,
                 tools=None,
@@ -313,7 +302,15 @@ class Client:
                 max_new_tokens=2048,
                 model="ravenv2",
                 tool_choice="auto",
+                stream=False,
             ):
+                if model != "ravenv2":
+                    self.logger.error("Only ravenv2 model supported!")
+                    return None
+
+                if tool_choice != "auto":
+                    self.logger.error("Only auto tool choice supported!")
+                    return None
                 assert len(messages) == 1, "Only single message is supported"
                 stop = ["</s>"] if include_reasoning else ["<bot_end>"]
                 headers = self._build_headers()
@@ -324,6 +321,38 @@ class Client:
                     formatted_tools, messages[0]["content"], max_new_tokens, stop
                 )
 
+                if stream:
+                    return self._acreate_stream(
+                        headers,
+                        payload,
+                    )
+                else:
+                    return await self._acreate(
+                        headers,
+                        payload,
+                        include_reasoning,
+                    )
+
+            async def _acreate(
+                self,
+                headers,
+                payload,
+                include_reasoning,
+            ):
+                url = self.NEXUS_URL + "/generate"
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url, headers=headers, json=payload
+                    ) as response:
+                        return await self._aprocess_response(
+                            response, include_reasoning
+                        )
+
+            async def _acreate_stream(
+                self,
+                headers,
+                payload,
+            ):
                 url = self.NEXUS_URL + "/generate_stream"
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
@@ -338,7 +367,7 @@ class Client:
                                 json_payload = json.loads(
                                     payload.lstrip("data:").rstrip("/n")
                                 )
-                                yield await self._process_chunk(json_payload)
+                                yield self._process_chunk(json_payload)
 
                 async def __aiter__(self):
                     return self
@@ -417,7 +446,7 @@ class Client:
                     },
                 }
 
-            async def _process_response(self, response, include_reasoning):
+            async def _aprocess_response(self, response, include_reasoning):
                 if not response.status == 200:
                     self.logger.error(f"An error occurred: {await response.json()}")
                     return None
@@ -460,7 +489,50 @@ class Client:
                     }
                 )
 
-            async def _process_chunk(self, json_payload):
+            def _process_response(self, response, include_reasoning):
+                if not response.status_code == 200:
+                    self.logger.error(f"An error occurred: {response.json()}")
+                    return None
+
+                response_data = response.json()[0]
+                if include_reasoning:
+                    try:
+                        calls, reasoning = response_data["generated_text"].split(
+                            "<bot_end>"
+                        )
+                        calls = calls.strip()
+                        reasoning = reasoning.strip()
+                    except:
+                        # This version of TGI does not retain special tokens.
+                        calls, reasoning = response_data["generated_text"].split(
+                            "Thought:"
+                        )
+                        calls = calls.strip()
+                        reasoning = "Thought: " + reasoning.strip()
+                else:
+                    calls, reasoning = response_data["generated_text"], None
+                    calls = calls.strip()
+
+                tools, raw_calls = self._parse_tool_calls(calls)
+                return AttrDict(
+                    {
+                        "choices": [
+                            AttrDict(
+                                {
+                                    "message": AttrDict(
+                                        {
+                                            "tool_calls": tools,
+                                            "reasoning": reasoning,
+                                            "raw_calls": raw_calls,
+                                        }
+                                    )
+                                }
+                            )
+                        ]
+                    }
+                )
+
+            def _process_chunk(self, json_payload):
                 return {
                     "data": AttrDict(
                         {
