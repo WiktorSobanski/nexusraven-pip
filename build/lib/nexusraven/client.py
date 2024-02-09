@@ -200,7 +200,7 @@ class Client:
                     raw_calls.append(line)
                 return tool_calls, raw_calls
 
-            def create(self, messages, tools=None, include_reasoning=False, max_new_tokens=2048, model="ravenv2", tool_choice="auto", temperature=0.01):
+            def create(self, messages, tools=None, include_reasoning=False, max_new_tokens=2048, model="ravenv2", tool_choice="auto"):
                 if model != "ravenv2":
                     self.logger.error("Only ravenv2 model supported!")
                     return None
@@ -215,7 +215,7 @@ class Client:
 
                 formatted_tools = [self._generate_function(tool) for tool in tools]
 
-                payload = self._build_payload(formatted_tools, messages[0]['content'], max_new_tokens, stop, temperature=temperature)
+                payload = self._build_payload(formatted_tools, messages[0]['content'], max_new_tokens, stop)
                 
                 response = requests.post(self.NEXUS_URL, headers=headers, json=payload)
                 return self._process_response(response, include_reasoning)
@@ -268,10 +268,10 @@ class Client:
                     items["Authorization"] = f"Bearer {self.NEXUS_KEY}"
                 return items
 
-            def _build_payload(self, formatted_tools, user_query, max_new_tokens, stop, temperature=0.01):
+            def _build_payload(self, formatted_tools, user_query, max_new_tokens, stop):
                 return {
                     "inputs": "Function:\n" + "\nFunction:\n".join(formatted_tools) + "\n\nUser Query: " + user_query + "<human_end>",
-                    "parameters": {"max_new_tokens": max_new_tokens, "return_full_text": False, "stop": stop, "do_sample": False, "temperature": temperature}
+                    "parameters": {"max_new_tokens": max_new_tokens, "return_full_text": False, "stop": stop, "do_sample": False, "temperature": 0.01}
                 }
 
             def _process_response(self, response, include_reasoning):
